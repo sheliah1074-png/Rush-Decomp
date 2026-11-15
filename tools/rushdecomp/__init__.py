@@ -59,15 +59,20 @@ Analysis:
 :mod:`~rushdecomp.cli`
     The ``sr`` command line.
 
-No ROM, and nothing derived from one
-------------------------------------
-This package reads whatever image you point it at and writes only into the
-generated directories the repository's ``.gitignore`` excludes.  It fetches
-nothing, embeds nothing, and contains no data from any commercial game.  The
-test suite runs against a synthetic image built from code in this repository.
+The cartridge versus work derived from it
+-----------------------------------------
+This package reads whatever image you point it at.  It fetches nothing and
+embeds nothing: no cartridge image and no verbatim copy of one is present in
+this repository, and the test suite runs against a synthetic image built from
+code written here.
+
+Raw extraction output goes to ``data/``, ``fsdump/`` and ``build/``, which
+``.gitignore`` excludes because those are byte-identical chunks of the
+cartridge.  Derived *analysis* -- the disassembly in ``asm/`` and conversions in
+``assets/`` -- is tracked, and is the point of the project.
 
 See ``docs/ROM_SETUP.md`` for how to supply your own dump of a cartridge you
-own, and ``docs/CONTRIBUTING.md`` for the rules about ROM-derived data.
+own, and ``docs/CONTRIBUTING.md`` for what may and may not be committed.
 """
 
 from __future__ import annotations

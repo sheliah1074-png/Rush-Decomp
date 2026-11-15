@@ -37,7 +37,8 @@ OVERLAY_NAMES := $(patsubst data/%.bin,%,$(OVERLAYS))
 help:
 	@echo "Rush-Decomp"
 	@echo
-	@echo "This repository contains no ROM and nothing derived from one."
+	@echo "This repository contains no cartridge image and no verbatim copy of one."
+	@echo "Derived analysis (asm/, assets/) is committed on purpose."
 	@echo "Dump your own cartridge into $(ROM) first -- see docs/ROM_SETUP.md."
 	@echo
 	@echo "Setup"

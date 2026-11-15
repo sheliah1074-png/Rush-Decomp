@@ -1,11 +1,14 @@
 # ROM setup
 
-This repository contains **no ROM and nothing derived from one**. Not a
-cartridge image, not an extracted binary, not a disassembly, not a texture, not
-a sound bank. That is deliberate and it is enforced: `.gitignore` excludes every
-directory those artifacts would land in, `tests/test_pipeline.py` has a
-`RepoHygieneTest` class that fails the build if any tracked file is a ROM or
-looks like one, and CI runs that test on every push.
+This repository contains **no cartridge image and no verbatim copy of one**.
+`.gitignore` excludes `baserom/`, `data/`, `fsdump/` and `build/`;
+`RepoHygieneTest` reads the first 0x4000 bytes of every tracked file and fails
+the build if any of them opens with a plausible cartridge header, so renaming an
+image does not get it through; and CI runs that check over every blob in git
+history on every push.
+
+Derived *analysis* is a different matter and is committed on purpose — see
+[What is and is not in this repository](../README.md#what-is-and-is-not-in-this-repository).
 
 So the first thing you have to do is supply your own image.
 

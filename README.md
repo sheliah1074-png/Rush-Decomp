@@ -76,7 +76,7 @@ make setup
 ```
 
 No ROM needed for that. It creates a venv, installs `capstone` and
-`keystone-engine`, builds the synthetic test image, runs 44 tests, then drives
+`keystone-engine`, builds the synthetic test image, runs 55 tests, then drives
 the complete pipeline against it and `cmp`s the rebuilt image against the base.
 
 Then, with your own dump at `baserom/sonic_rush.nds`:
@@ -148,12 +148,17 @@ tools/rushdecomp/         the toolkit
   cli.py                  the verbs
 include/nitro/            hand-written hardware headers
 src/                      hand-written C reconstruction
+asm/                      committed disassembly          (tracked)
+assets/                   converted art/audio, symbol maps (tracked)
 config/                   per-revision expected identity
 tests/                    end-to-end tests + synthetic image builder
 docs/                     documentation
 ```
 
-`data/`, `asm/`, `fsdump/`, `build/` and `baserom/` are generated and gitignored.
+`data/`, `fsdump/`, `build/` and `baserom/` are generated and gitignored: they
+hold the image itself and verbatim chunks of it. `asm/` and `assets/` are
+generated too but **tracked** — see
+[What is and is not in this repository](#what-is-and-is-not-in-this-repository).
 
 ## Documentation
 
@@ -164,7 +169,7 @@ docs/                     documentation
 - [`docs/BUILDING.md`](docs/BUILDING.md) — dependencies, the CLI, compiling C,
   and what "matching" actually requires
 - [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) — what needs doing, how to
-  convert a function, the rules about ROM-derived data
+  convert a function, what may and may not be committed
 
 ## Requirements
 

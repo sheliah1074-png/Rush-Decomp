@@ -145,7 +145,7 @@ useful: understanding how the game works, porting its logic, or building mods.
 ## Tests
 
 ```sh
-make test          # 44 tests, runs standalone or under pytest
+make test          # 55 tests, runs standalone or under pytest
 make selfcheck     # the full pipeline against the synthetic image
 make check         # both
 ```

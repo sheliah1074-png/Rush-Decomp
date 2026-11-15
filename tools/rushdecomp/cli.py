@@ -436,8 +436,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="sr",
         description="Rush-Decomp toolchain for Nintendo DS cartridge images.",
         epilog=(
-            "This project contains no ROM and no data derived from one. "
-            "Supply your own dump; see docs/ROM_SETUP.md."
+            "This project contains no cartridge image and no verbatim copy of "
+            "one; derived analysis is committed on purpose. Supply your own "
+            "dump; see docs/ROM_SETUP.md."
         ),
     )
     parser.add_argument("--version", action="version", version="Rush-Decomp tools 0.1.0")
