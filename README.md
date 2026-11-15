@@ -141,7 +141,8 @@ docs/                     documentation
 
 ## Requirements
 
-Python 3.9+, plus:
+Python 3.11+ (3.9 and 3.10 are past end of life and absent from current CI
+runner images, though the code itself uses no newer syntax), plus:
 
 | Package | For |
 |---|---|

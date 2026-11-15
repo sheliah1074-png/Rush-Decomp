@@ -569,7 +569,13 @@ class ProgressTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
-    runner = unittest.TextTestRunner(verbosity=2)
-    outcome = runner.run(suite)
+    # Honour `test_pipeline.py ClassName[.method]` selectors.  Loading the whole
+    # module unconditionally would make CI's `RepoHygieneTest`-only job silently
+    # run everything instead, which is how a targeted check stops being one.
+    loader = unittest.defaultTestLoader
+    if len(sys.argv) > 1:
+        suite = loader.loadTestsFromNames(sys.argv[1:], module=sys.modules[__name__])
+    else:
+        suite = loader.loadTestsFromModule(sys.modules[__name__])
+    outcome = unittest.TextTestRunner(verbosity=2).run(suite)
     raise SystemExit(0 if outcome.wasSuccessful() else 1)

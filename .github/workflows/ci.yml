@@ -24,7 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.9', '3.11', '3.12']
+        # 3.9 and 3.10 are past end of life and no longer present on the
+        # ubuntu-latest runner image, so setup-python cannot install them.
+        python-version: ['3.11', '3.12', '3.13']
 
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +106,16 @@ jobs:
       - name: No tracked file looks like a ROM
         run: |
           set -e
-          bad=$(git ls-files | grep -Ei '\.(nds|srl|ds|nd|dsg|gba|sfc|smc|gen|md|bin|ppm|sav)$' || true)
+          # Deliberately narrower than "every console extension ever".  Several
+          # of them collide with ordinary text files -- `md` is both the Genesis
+          # ROM extension and Markdown, `ds` and `gen` turn up as source and
+          # documentation names -- and a check that flags the project's own
+          # docs is a check that gets disabled.  This list covers what a DS
+          # decompilation could realistically leak, and matches the
+          # `forbidden_suffixes` tuple in RepoHygieneTest.
+          bad=$(git ls-files \
+                | grep -Ei '\.(nds|srl|dsg|nd|gba|sfc|smc|smd|n64|z64|v64|bin|ppm|sav)$' \
+                | grep -v '^\.gitkeep$' || true)
           if [ -n "$bad" ]; then
             echo "::error::tracked files with ROM-like extensions:"
             echo "$bad"

@@ -4,7 +4,7 @@
 
 The toolchain: a Python package that parses DS cartridge images, disassembles
 their ARM and Thumb code, reassembles it, and verifies the result byte for byte.
-That is complete, tested, and needs nothing but Python 3.9+ and two pip
+That is complete, tested, and needs nothing but Python 3.11+ and two pip
 packages.
 
 ```sh
@@ -23,7 +23,7 @@ No ROM, no compiler and no network access beyond PyPI are needed for that.
 
 | Dependency | Needed for | Install |
 |---|---|---|
-| Python 3.9+ | everything | usually present |
+| Python 3.11+ | everything | usually present |
 | `capstone` | disassembly | `make deps` |
 | `keystone-engine` | reassembly, byte-exactness | `make deps` |
 | `arm-none-eabi-gcc` | compiling C in `src/` | your package manager |
