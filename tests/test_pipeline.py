@@ -41,6 +41,7 @@ from rushdecomp.crc import crc16, crc16_ccitt  # noqa: E402
 from rushdecomp.header import (  # noqa: E402
     Header,
     declared_extents,
+    looks_like_cartridge_prefix,
     looks_like_nds,
     required_length,
     size_report,
@@ -577,45 +578,100 @@ class CliTest(unittest.TestCase):
 
 
 class RepoHygieneTest(unittest.TestCase):
-    """The rule that matters most: no ROM-derived bytes in git."""
+    """The rule that matters most: no cartridge image in git.
 
-    def test_gitignore_covers_the_dangerous_paths(self):
+    The policy is a line between the cartridge and work derived from it.  Derived
+    work -- disassembly, converted art, symbol maps -- is tracked, and is the
+    point of the project.  What must never be tracked is the image itself or its
+    verbatim contents.  That is a narrower claim than "nothing derived", and it
+    needs a narrower set of checks to enforce.
+    """
+
+    #: Paths that must stay ignored: the cartridge and its verbatim contents.
+    IGNORED = ("baserom/", "*.nds", "data/", "build/", "fsdump/", "tools/keys/")
+
+    #: Paths that must stay committable: the work product.
+    TRACKED = (
+        os.path.join("asm", "arm9.s"),
+        os.path.join("asm", "arm9.json"),
+        os.path.join("assets", "symbols", "arm9.txt"),
+        os.path.join("src", "example", "example.c"),
+    )
+
+    #: Original code produced by make_test_rom, never a retail dump.
+    ALLOWED_IMAGES = {os.path.join("tests", "data", "testrom.nds")}
+
+    def tracked_files(self):
+        listing = subprocess.run(
+            ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, timeout=120,
+        )
+        if listing.returncode != 0:
+            self.skipTest("not a git checkout")
+        return [line for line in listing.stdout.splitlines() if line]
+
+    def test_gitignore_covers_the_cartridge_and_its_verbatim_contents(self):
         with open(os.path.join(ROOT, ".gitignore"), encoding="utf-8") as handle:
             rules = handle.read()
-        for required in ("baserom/", "*.nds", "data/", "asm/", "fsdump/", "build/"):
+        for required in self.IGNORED:
             self.assertIn(required, rules, f".gitignore must exclude {required}")
 
-    def test_no_tracked_file_is_a_rom_or_derived_from_one(self):
-        listing = subprocess.run(
-            ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, timeout=120,
-        )
-        if listing.returncode != 0:
-            self.skipTest("not a git checkout")
-        tracked = [line for line in listing.stdout.splitlines() if line]
-        forbidden_suffixes = (".nds", ".srl", ".bin", ".ppm")
-        allowed = {
-            os.path.join("tests", "data", "testrom.nds"),
-        }
-        offenders = [
-            path for path in tracked
-            if path.endswith(forbidden_suffixes) and path not in allowed
-        ]
-        self.assertEqual(offenders, [], "tracked files must not include ROM data")
+    def test_gitignore_does_not_swallow_the_work_product(self):
+        """The mirror of the test above, and the one that fails silently.
 
-    def test_no_tracked_file_is_large(self):
-        listing = subprocess.run(
-            ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, timeout=120,
-        )
-        if listing.returncode != 0:
-            self.skipTest("not a git checkout")
-        for path in listing.stdout.splitlines():
-            if not path:
+        A rule broad enough to keep a ROM out can easily keep the disassembly out
+        as well, and then the repository looks immaculate while containing no
+        work at all.  Both directions have to be pinned.
+        """
+        for path in self.TRACKED:
+            probe = subprocess.run(
+                ["git", "check-ignore", "-q", path], cwd=ROOT, timeout=60,
+            )
+            self.assertNotEqual(probe.returncode, 0, f"{path} must be committable")
+
+    def test_no_tracked_file_is_named_like_a_cartridge_image(self):
+        forbidden = (".nds", ".srl", ".dsg", ".nd")
+        offenders = [
+            path for path in self.tracked_files()
+            if path.endswith(forbidden) and path not in self.ALLOWED_IMAGES
+        ]
+        self.assertEqual(offenders, [], "tracked files must not include a cartridge image")
+
+    def test_no_tracked_file_is_a_renamed_cartridge_image(self):
+        """Extension rules are trivia.  This one reads the bytes instead."""
+        offenders = []
+        for path in self.tracked_files():
+            if path in self.ALLOWED_IMAGES:
                 continue
             full = os.path.join(ROOT, path)
-            if os.path.isfile(full):
+            if not os.path.isfile(full):
+                continue
+            with open(full, "rb") as handle:
+                prefix = handle.read(0x4000)
+            reason = looks_like_cartridge_prefix(prefix, file_size=os.path.getsize(full))
+            if reason:
+                offenders.append(f"{path}: {reason}")
+        self.assertEqual(offenders, [], "no tracked file may open with a cartridge header")
+
+    def test_no_tracked_binary_file_is_large(self):
+        """Binary blobs stay small; text is exempt, because disassembly is text.
+
+        A full ARM9 listing legitimately runs to tens of megabytes.  A *binary*
+        that large does not: it is either a cartridge image or raw extraction
+        output, and both belong under baserom/ or data/, which are ignored.
+        """
+        for path in self.tracked_files():
+            full = os.path.join(ROOT, path)
+            if not os.path.isfile(full):
+                continue
+            with open(full, "rb") as handle:
+                probe = handle.read(4096)
+            try:
+                probe.decode("utf-8")
+            except UnicodeDecodeError:
                 self.assertLess(
                     os.path.getsize(full), 1 << 20,
-                    f"{path} is over 1 MiB; generated data belongs outside git",
+                    f"{path} is a binary file over 1 MiB; raw extraction output "
+                    "belongs in data/, which is gitignored",
                 )
 
 

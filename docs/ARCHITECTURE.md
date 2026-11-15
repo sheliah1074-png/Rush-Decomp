@@ -132,12 +132,25 @@ tools/
     cli.py               argument parsing and the verbs
 include/nitro/           hardware headers, hand-written
 src/                     hand-written C reconstruction
+assets/                  converted art and audio, symbol maps, FS listings
 config/                  per-revision expected identity
 tests/                   end-to-end tests plus the synthetic image builder
 docs/                    this directory
 ```
 
-`data/`, `asm/`, `fsdump/`, `build/` and `baserom/` are generated and gitignored.
+`data/`, `fsdump/`, `build/` and `baserom/` are generated and gitignored: they
+hold the image itself and verbatim chunks of it, which concatenated would
+reconstitute most of a cartridge. `asm/` is generated too, but tracked — the
+disassembly is this project's work product, and it carries naming and structure
+that do not exist in the binary it came from. `assets/` holds conversions out of
+the cartridge's own formats rather than raw dumps.
+
+That split is the convention the public decompilation projects follow.
+`pret/pokered` commits its full disassembly and converted `gfx/*.png` while
+gitignoring the compiled `*.gb`; `zeldaret/ph` and `zeldaret/st` gitignore
+`*.nds` and their extracted directories. `make clean` respects the distinction
+by cleaning `asm/` and `assets/` through git, so it removes generated files
+without deleting committed ones.
 
 ### How disassembly decides what is code
 

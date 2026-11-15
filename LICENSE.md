@@ -38,8 +38,13 @@ It does not cover, and grants no rights in:
     present in this repository;
   * any Codewarrior for NDS toolchain or its output.
 
-Nothing in this repository is a ROM or is derived from one. Generated artifacts
--- the cartridge image you supply, the binaries extracted from it, the
-disassembly produced from those, the file system contents and the rebuilt image
--- are written into directories excluded from version control and are yours
-alone. See docs/CONTRIBUTING.md and docs/ROM_SETUP.md.
+No cartridge image is present in this repository, and no verbatim copy of one.
+Raw extraction output -- the image you supply, the binaries split from it, the
+file system contents and the rebuilt image -- is written into directories
+excluded from version control and remains yours alone.
+
+Derived analysis is present: the disassembly under asm/ and converted art, audio
+and symbol maps under assets/. This licence grants no rights in that material
+either. It is included on the same basis as other public decompilation projects,
+and the judgement about whether that is lawful where you are is yours to make.
+See docs/CONTRIBUTING.md and docs/ROM_SETUP.md.

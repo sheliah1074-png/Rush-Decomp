@@ -28,6 +28,7 @@ __all__ = [
     "required_length",
     "size_report",
     "looks_like_nds",
+    "looks_like_cartridge_prefix",
 ]
 
 HEADER_SIZE = 0x4000
@@ -488,3 +489,42 @@ def size_report(
             f"(0x{actual_length - need:x} of slack past it)"
         )
     return lines
+
+
+def looks_like_cartridge_prefix(
+    data: bytes, *, file_size: Optional[int] = None
+) -> Optional[str]:
+    """Return a reason string if *data* opens with a plausible cartridge header.
+
+    Where :func:`looks_like_nds` validates a whole image against its own length,
+    this judges a prefix on its own.  That is what a repository scan needs: it
+    has to catch a cartridge image that was renamed, split, or committed under
+    an innocent extension, and it cannot read 64 MiB of every tracked file to
+    find out.
+
+    The tests are deliberately conjunctive -- unit code, capacity code, a game
+    code of four ASCII alphanumerics, and an ARM9 that starts at or past the end
+    of the header -- because any one of them alone fires on ordinary binary
+    data.  Together they are close to impossible to hit by accident: byte 0x012
+    has to be 0x00/0x02/0x03, which is not a printable character, so text files
+    of any kind are excluded outright.
+    """
+    size = len(data) if file_size is None else file_size
+    if size < 0x160 or len(data) < 0x160:
+        return None
+    if data[0x012] not in (0x00, 0x02, 0x03):
+        return None
+    if data[0x014] > 0x0F:
+        return None
+    code = bytes(data[0x00C:0x010])
+    if not all(
+        0x30 <= byte <= 0x39 or 0x41 <= byte <= 0x5A or 0x61 <= byte <= 0x7A
+        for byte in code
+    ):
+        return None
+    if u32(data, 0x024) < 0x4000:
+        return None
+    return (
+        "begins with a plausible DS cartridge header "
+        f"(game code {code.decode('ascii', 'replace')!r})"
+    )

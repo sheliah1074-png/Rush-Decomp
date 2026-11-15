@@ -2,8 +2,10 @@
 # Rush-Decomp
 #
 # Every target that touches cartridge data reads it from baserom/ and writes it
-# into data/, asm/, fsdump/ or build/ -- all four are gitignored.  Nothing here
-# downloads a ROM, and no target can put one in git.
+# into data/, asm/, fsdump/ or build/.  baserom/, data/, fsdump/ and build/ are
+# gitignored: they hold the image itself and verbatim chunks of it.  asm/ is
+# TRACKED -- the disassembly is this project's work product and is committed.
+# Nothing here downloads a ROM, and no target can put one in git.
 #
 # Start with:  make help
 # ---------------------------------------------------------------------------
@@ -155,8 +157,24 @@ setup: deps selftest check
 	@echo "Setup complete.  The toolchain is verified against the synthetic"
 	@echo "image.  Next: put your own dump at $(ROM) and run 'make report'."
 
+# clean is deliberately asymmetric. data/, build/ and fsdump/ hold only ignored
+# generated output, so git clean -x sweeps them while sparing their tracked
+# .gitkeep placeholders. asm/ and assets/ hold COMMITTED work, so a blanket
+# `git clean -fd` there deletes untracked files a contributor has not committed
+# yet -- it destroyed both directories' READMEs on the first run after this
+# policy changed. Only the known generated patterns are removed from asm/, and
+# only when git does not already track them. assets/ is left entirely alone.
 clean:
-	rm -rf build data/*.bin data/*.json data/*.ppm asm/*.s asm/*.json fsdump
+	@if [ -d .git ]; then \
+		git clean -qfdx data build fsdump; \
+		for f in asm/*.s asm/*.json; do \
+			[ -e "$$f" ] || continue; \
+			git ls-files --error-unmatch "$$f" >/dev/null 2>&1 || rm -f "$$f"; \
+		done; \
+	else \
+		rm -rf build data/*.bin data/*.json data/*.ppm fsdump/*; \
+		rm -f asm/*.s asm/*.json; \
+	fi
 
 clean-all: clean
 	rm -rf $(VENV) tools/__pycache__ tools/rushdecomp/__pycache__ \

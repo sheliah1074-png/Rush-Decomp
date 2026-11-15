@@ -9,21 +9,48 @@ original**. That round trip is what makes the project a decompilation rather
 than a pile of hex dumps: every claim about the code is machine-checkable
 against the binary it came from.
 
-## This repository contains no ROM
+## What is and is not in this repository
 
-Not the cartridge image, not an extracted binary, not a disassembly, not a
-texture, not a sound bank — nothing derived from any commercial game. This is
-enforced three ways:
+The line this project draws is between **the cartridge** and **work derived from
+it**.
 
-- `.gitignore` excludes every directory generated artifacts would land in
-  (`baserom/`, `data/`, `asm/`, `fsdump/`, `build/`, `tools/keys/`)
-- `RepoHygieneTest` fails the build if any tracked file has a ROM-like
-  extension or exceeds 1 MiB
-- CI runs that test on every push
+Never committed:
 
-What *is* here is original tooling, documentation, hardware headers, and a
-**synthetic test cartridge** built from code written for this repository — which
-is how the whole pipeline is verified in CI without touching copyrighted data.
+- `baserom/` — the cartridge image, the copyrighted work itself
+- `build/` — build products, including `rebuilt.nds`, because a rebuilt image is
+  still an image
+- `data/`, `fsdump/` — raw extraction output: byte-identical chunks of the
+  cartridge which, concatenated, reconstitute most of it
+- `tools/keys/` — the Nintendo KEY1 blob is copyrighted firmware data
+
+Committed, because it is the work product:
+
+- `asm/` — the disassembly, carrying the symbol names and structure given to it
+  here rather than anything present in the original binary
+- `assets/` — art and audio *converted* out of the cartridge's own formats, plus
+  symbol maps and filesystem listings
+- `src/`, `include/`, `docs/`, `tools/` — original reconstruction and tooling
+- a **synthetic test cartridge** built from code written for this repository,
+  which is how the whole pipeline is verified in CI without touching a retail
+  dump
+
+This follows the convention the public decompilation projects actually use:
+[`pret/pokered`](https://github.com/pret/pokered) commits its full disassembly
+and converted `gfx/*.png` while gitignoring the compiled `*.gb`;
+[`zeldaret/ph`](https://github.com/zeldaret/ph) and
+[`zeldaret/st`](https://github.com/zeldaret/st) gitignore `*.nds` and their
+extracted directories.
+
+Enforced three ways:
+
+- `.gitignore` excludes the cartridge and its verbatim contents, and is tested in
+  *both* directions — a rule broad enough to keep a ROM out can quietly keep the
+  disassembly out too, leaving a repository that looks clean and contains no work
+- `RepoHygieneTest` reads the first 0x4000 bytes of every tracked file and fails
+  if any of them opens with a plausible cartridge header, so renaming an image
+  does not help it get through
+- CI runs that same content check over **every blob in git history**, not just
+  the tip
 
 You supply your own dump of a cartridge you own. See
 [`docs/ROM_SETUP.md`](docs/ROM_SETUP.md).
@@ -184,7 +211,12 @@ is a Sega work, and it grants no rights in any ROM or in anything extracted from
 one.
 
 This project exists to study and understand a commercial game, in the tradition
-of other decompilation and preservation efforts. It distributes no ROM, no
-extracted asset, and no copyrighted code. You are responsible for how you use
-it: dump your own cartridge, keep the output on your own machine, and do not
-upload what `.gitignore` excludes.
+of other decompilation and preservation efforts. It distributes no cartridge
+image and no verbatim copy of one. Derived analysis — disassembly, converted
+assets, symbol maps — is committed here on the same basis as the public
+decompilation projects listed above; whether that is lawful where you are is
+your judgement to make, and not something an MIT licence on the tooling settles
+for you.
+
+You are responsible for how you use it: dump your own cartridge, and never upload
+what `.gitignore` excludes.
