@@ -76,7 +76,7 @@ make setup
 ```
 
 No ROM needed for that. It creates a venv, installs `capstone` and
-`keystone-engine`, builds the synthetic test image, runs 55 tests, then drives
+`keystone-engine`, builds the synthetic test image, runs 64 tests, then drives
 the complete pipeline against it and `cmp`s the rebuilt image against the base.
 
 Then, with your own dump at `baserom/sonic_rush.nds`:
@@ -89,6 +89,7 @@ make disasm-all    # every component -> asm/<name>.s
 make verify-all    # round trip each one, byte for byte
 make rebuild       # rebuild a full image, compare to the base ROM
 make progress      # how much is expressed as C
+make assets        # write the TRACKED artifacts under assets/
 ```
 
 ## What the pipeline does
@@ -145,6 +146,7 @@ tools/rushdecomp/         the toolkit
   disasm.py               recursive-descent ARM/Thumb disassembler
   assembler.py            round trip and byte comparison
   progress.py             matching-progress accounting
+  artifacts.py            the tracked assets/ artifacts + the leak check
   cli.py                  the verbs
 include/nitro/            hand-written hardware headers
 src/                      hand-written C reconstruction

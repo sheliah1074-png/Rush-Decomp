@@ -129,6 +129,7 @@ tools/
     disasm.py            capstone-based recursive-descent disassembler
     assembler.py         keystone-based round trip and byte comparison
     progress.py          matching-progress accounting
+    artifacts.py         the tracked assets/ artifacts, and the leak check
     cli.py               argument parsing and the verbs
 include/nitro/           hardware headers, hand-written
 src/                     hand-written C reconstruction

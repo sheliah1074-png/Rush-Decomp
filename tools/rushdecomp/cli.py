@@ -28,6 +28,7 @@ from . import lz77
 from .assembler import assemble_file, round_trip
 from .disasm import Disassembler, Mode, require_capstone, write_sidecar
 from .progress import load_progress, save_progress
+from .artifacts import ASSETS_DIR, publish as publish_artifacts
 from .rom import BinaryImage, NDSRom, RomError, diagnose
 from .util import ensure_dir, hexdigest, human_size, read_file, write_file
 
@@ -431,6 +432,39 @@ def cmd_progress(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------
 # parser
 # --------------------------------------------------------------------------
+def cmd_assets(args: argparse.Namespace) -> int:
+    """Generate the tracked artifacts under ``assets/`` from a cartridge image.
+
+    Unlike every other verb here, this one writes files that are meant to be
+    committed.  It refuses to write anything that shares a verbatim run of bytes
+    with the image -- see :func:`artifacts.find_verbatim_run`.
+    """
+    rom = NDSRom.open(_resolve_rom(args.rom))
+    asm_dir = args.asm_dir or ASM_DIR
+    out_dir = args.out_dir or ASSETS_DIR
+    try:
+        written = publish_artifacts(rom, asm_dir=asm_dir, out_dir=out_dir)
+    except ValueError as error:
+        return _fail(str(error))
+
+    for path in written:
+        _say(f"  wrote {path}")
+    _say()
+
+    sidecars = (
+        [p for p in os.listdir(asm_dir) if p.endswith(".json")]
+        if os.path.isdir(asm_dir)
+        else []
+    )
+    if not sidecars:
+        _say(f"note: no disassembly sidecars in {asm_dir}/, so no symbol maps.")
+        _say("      run 'sr disasm' for each component first, then re-run this.")
+    _say(f"{len(written)} artifacts under {out_dir}/.")
+    if os.path.abspath(out_dir) == os.path.abspath(ASSETS_DIR):
+        _say("That directory is tracked: review the diff before committing it.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sr",
@@ -494,6 +528,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("progress", help="report matching progress")
     p.add_argument("--json", default=None, help="also write the record to this path")
     p.set_defaults(func=cmd_progress)
+
+    p = sub.add_parser("assets", help="generate the tracked artifacts under assets/")
+    add_rom(p)
+    p.add_argument("--asm-dir", default=None,
+                   help=f"disassembly sidecars to build symbol maps from (default {ASM_DIR})")
+    p.add_argument("--out-dir", default=None,
+                   help=f"where to write (default {ASSETS_DIR})")
+    p.set_defaults(func=cmd_assets)
 
     return parser
 

@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -30,6 +31,13 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, HERE)
 
 from rushdecomp import lz77  # noqa: E402
+from rushdecomp.artifacts import (  # noqa: E402
+    filesystem_listing,
+    find_verbatim_run,
+    layout_document,
+    publish,
+    symbol_map,
+)
 from rushdecomp.arm9 import (  # noqa: E402
     ARM9_STATIC_MARKER,
     ARM9Image,
@@ -710,6 +718,160 @@ class ProgressTest(unittest.TestCase):
             joined = " ".join(progress.images["arm9"].problems)
             self.assertIn("func_deadbeef", joined)
             self.assertIn("8 bytes", joined)
+
+
+class ArtifactsTest(unittest.TestCase):
+    """The tracked artifacts under assets/, and the rule that keeps them clean.
+
+    These are the only generated files the repository commits, so the property
+    that matters is that they describe the cartridge without reproducing any of
+    it. That is asserted mechanically rather than by inspection.
+    """
+
+    SIDECAR = {
+        "name": "arm9",
+        "base_address": 0x02000000,
+        "stats": {
+            "instructions": 3, "functions": 2, "code_bytes": 40,
+            "data_bytes": 8, "image_bytes": 48, "unresolved_tails": 1,
+            "labels": 3,
+        },
+        "labels": [
+            {"address": 0x02000020, "name": "func_02000020", "mode": "arm",
+             "kind": "function", "reached_from": None},
+            {"address": 0x02000000, "name": "func_02000000", "mode": "arm",
+             "kind": "function", "reached_from": None},
+            {"address": 0x0200002C, "name": "dat_0200002c", "mode": "arm",
+             "kind": "data", "reached_from": None},
+        ],
+        "functions": [
+            {"start": 0x02000000, "end": 0x02000020, "mode": "arm", "origin": "entry"},
+            {"start": 0x02000020, "end": 0x0200002C, "mode": "arm", "origin": "prologue"},
+        ],
+        "unresolved_tails": [],
+        "data_ranges": [{"start": 0x0200002C, "end": 0x02000030}],
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.image = build_test_rom()
+        cls.rom = NDSRom(cls.image, path="<synthetic>")
+
+    def test_symbol_map_is_address_ordered_and_carries_extents(self):
+        text = symbol_map(self.SIDECAR)
+        body = [l for l in text.splitlines() if l.startswith("0x")]
+        addresses = [int(l.split()[0], 16) for l in body]
+        self.assertEqual(addresses, sorted(addresses), "labels must be address-ordered")
+        self.assertIn("func_02000000", text)
+        # A function's extent comes from the functions table, not the label.
+        first = next(l for l in body if "func_02000000" in l)
+        self.assertIn("0x20", first, "32-byte extent")
+        # A data label has no extent and must not invent one.
+        data = next(l for l in body if "dat_0200002c" in l)
+        self.assertIn(" - ", data)
+
+    def test_filesystem_listing_names_files_without_reproducing_them(self):
+        text = filesystem_listing(self.rom.filesystem)
+        for entry in self.rom.filesystem:
+            self.assertIn(entry.path, text)
+        self.assertIn("by extension:", text)
+        self.assertIsNone(
+            find_verbatim_run(text, self.image),
+            "a listing of paths and sizes must not embed cartridge bytes",
+        )
+
+    def test_layout_document_publishes_the_digest_not_the_image(self):
+        text = layout_document(self.rom, [self.SIDECAR])
+        self.assertIn(self.rom.digest(), text, "digest is the point of the section")
+        self.assertIn("RUSHDECOMP", text)
+        self.assertIn("TSTR", text)
+        self.assertIn("ARM9 overlays", text)
+        # The sidecar contributes its statistics, not its symbol names: those
+        # belong to symbols/<component>.txt and duplicating them here would give
+        # a contributor two files to rename in.
+        self.assertIn("## Disassembly", text)
+        self.assertIn("| `arm9` | 2 | 3 | 40 | 8 | 1 |", text)
+        self.assertNotIn("func_02000000", text)
+        self.assertIsNone(find_verbatim_run(text, self.image))
+
+    def test_verbatim_run_catches_a_pasted_hexdump(self):
+        """Negative control: a check that cannot fail is not a check."""
+        stolen = self.image[0x6000 : 0x6000 + 16]
+        text = "some notes\n\n" + " ".join(f"{b:02x}" for b in stolen) + "\n"
+        self.assertEqual(find_verbatim_run(text, self.image), stolen.hex())
+
+    def test_verbatim_run_catches_a_dump_buried_in_a_longer_run(self):
+        """Padding around a dump must not let it through.
+
+        The window reported is not necessarily the one embedded here -- the
+        synthetic secure area is preceded by zeros, so the padded prefix joins
+        the stolen bytes into an equally genuine 16-byte run that starts earlier.
+        The property that matters is that *some* verbatim run is found, and that
+        whatever is reported really does occur in the image.
+        """
+        stolen = self.image[0x4000 : 0x4000 + 16]
+        text = "00 00 " + " ".join(f"{b:02x}" for b in stolen) + " ff ff"
+        found = find_verbatim_run(text, self.image)
+        self.assertIsNotNone(found)
+        self.assertEqual(len(bytes.fromhex(found)), 16)
+        self.assertIn(bytes.fromhex(found), self.image)
+
+    def test_verbatim_run_does_not_fire_on_a_table_of_addresses(self):
+        """Offsets and sizes are hex too; they must not look like a leak."""
+        text = "\n".join(
+            f"| ARM9 | `0x{off:08x}` | 0x{size:x} | 0x{off + size:08x} |"
+            for off, size in ((0x6000, 0x62), (0x6200, 0x1C), (0x6460, 0xF4))
+        )
+        self.assertIsNone(find_verbatim_run(text, self.image))
+
+    def test_publish_writes_every_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            asm = os.path.join(tmp, "asm")
+            os.makedirs(asm)
+            with open(os.path.join(asm, "arm9.json"), "w", encoding="utf-8") as handle:
+                json.dump(self.SIDECAR, handle)
+
+            written = publish(self.rom, asm_dir=asm, out_dir=os.path.join(tmp, "assets"))
+            names = {os.path.relpath(p, tmp) for p in written}
+            self.assertIn(os.path.join("assets", "layout.md"), names)
+            self.assertIn(os.path.join("assets", "filesystem.txt"), names)
+            self.assertIn(os.path.join("assets", "symbols", "arm9.txt"), names)
+            for path in written:
+                self.assertTrue(os.path.getsize(path) > 0, path)
+                with open(path, encoding="utf-8") as handle:
+                    self.assertIsNone(find_verbatim_run(handle.read(), self.image), path)
+
+    def test_publish_refuses_to_write_a_leak(self):
+        """Refusing before the write is the whole point of the check."""
+        stolen = self.image[0x6000 : 0x6000 + 16]
+        leaky = "# layout\n\n" + " ".join(f"{b:02x}" for b in stolen) + "\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "assets")
+            with mock.patch(
+                "rushdecomp.artifacts.layout_document", return_value=leaky
+            ):
+                with self.assertRaises(ValueError) as caught:
+                    publish(self.rom, asm_dir=os.path.join(tmp, "nope"), out_dir=out)
+            self.assertIn("verbatim", str(caught.exception))
+            self.assertFalse(
+                os.path.exists(os.path.join(out, "layout.md")),
+                "a refused artifact must not reach the disk",
+            )
+
+    def test_publish_survives_an_unreadable_file_system(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "assets")
+            with mock.patch.object(
+                type(self.rom), "filesystem",
+                property(lambda self: (_ for _ in ()).throw(IndexError("bad FAT"))),
+            ):
+                written = publish(self.rom, asm_dir=os.path.join(tmp, "nope"), out_dir=out)
+            listing = os.path.join(out, "filesystem.txt")
+            self.assertIn(listing, written)
+            with open(listing, encoding="utf-8") as handle:
+                self.assertIn("unavailable", handle.read())
+
+
 
 
 if __name__ == "__main__":

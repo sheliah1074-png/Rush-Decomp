@@ -31,7 +31,7 @@ OVERLAY_NAMES := $(patsubst data/%.bin,%,$(OVERLAYS))
 .DEFAULT_GOAL := help
 .PHONY: help deps venv setup selftest test lint clean clean-all \
         report extract dumpfs disasm disasm-all verify verify-all \
-        rebuild progress check selfcheck
+        rebuild progress assets check selfcheck
 
 # --------------------------------------------------------------------------
 help:
@@ -55,6 +55,7 @@ help:
 	@echo "  make verify-all    disasm -> assemble -> compare, per component"
 	@echo "  make rebuild       rebuild a full image and compare to the base ROM"
 	@echo "  make progress      how much is expressed as C"
+	@echo "  make assets        write the TRACKED artifacts under assets/"
 	@echo "  make check         selftest + test + verify-all + rebuild"
 	@echo
 	@echo "Overrides"
@@ -98,6 +99,13 @@ selfcheck: $(SELFTEST)
 	@echo
 	@cmp build/rebuilt.nds $(SELFTEST)
 	@echo "selfcheck: rebuilt image is byte-identical to the synthetic base ROM"
+	@echo
+	@echo "== assets =="
+	$(SR) assets --rom $(SELFTEST) --out-dir build/assets-selftest
+	@test -s build/assets-selftest/layout.md
+	@test -s build/assets-selftest/filesystem.txt
+	@test -s build/assets-selftest/symbols/arm9.txt
+	@echo "selfcheck: artifact generation wrote layout, listing and symbol maps"
 
 test:
 	$(TESTS)
@@ -148,6 +156,13 @@ rebuild: verify-all
 
 progress:
 	$(SR) progress --json build/progress.json
+
+# The one verb that writes files meant to be COMMITTED.  Depends on disasm-all
+# so the symbol maps have sidecars to draw from; without them it still writes
+# layout.md and filesystem.txt and says why the maps are missing.
+assets: disasm-all
+	@echo "== assets =="
+	$(SR) assets --rom $(ROM)
 
 # Everything that can be checked without owning a cartridge.
 check: selftest test selfcheck

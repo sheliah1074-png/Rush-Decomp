@@ -8,6 +8,29 @@ gitignores the compiled `*.2bpp` intermediates.
 It is currently empty apart from this file: no retail cartridge has been
 analysed in this repository yet.
 
+## How these are generated
+
+```sh
+make assets        # extract -> disassemble every component -> write assets/
+```
+
+or directly, once `data/` and `asm/` are populated:
+
+```sh
+sr assets --rom baserom/sonic_rush.nds
+```
+
+`layout.md`, `filesystem.txt` and every `symbols/*.txt` are written by
+`tools/rushdecomp/artifacts.py`. Symbol maps need the disassembly sidecars in
+`asm/`, so run `sr disasm` per component first — without them the other two are
+still written and the command says why the maps are missing.
+
+**Generation refuses to write a leak.** Before any file reaches the disk,
+`find_verbatim_run()` scans it for 16 or more contiguous bytes that also occur
+in the cartridge image, and raises if it finds one. Offsets and sizes are hex
+too, but `0x` prefixes and column separators break candidate runs, so address
+tables pass while a pasted hexdump does not. Both directions are tested.
+
 ## What belongs here
 
 | Path | Contents |

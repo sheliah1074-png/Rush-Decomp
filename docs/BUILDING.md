@@ -55,6 +55,7 @@ make disasm-all    # every component -> asm/<name>.s + asm/<name>.json
 make verify-all    # round trip each one, byte for byte
 make rebuild       # rebuild a full image and compare to the base ROM
 make progress      # how much is expressed as C
+make assets        # write the TRACKED artifacts under assets/
 ```
 
 Any command takes `ROM=path` to override the default location:
@@ -145,7 +146,7 @@ useful: understanding how the game works, porting its logic, or building mods.
 ## Tests
 
 ```sh
-make test          # 55 tests, runs standalone or under pytest
+make test          # 64 tests, runs standalone or under pytest
 make selfcheck     # the full pipeline against the synthetic image
 make check         # both
 ```
