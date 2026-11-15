@@ -38,8 +38,14 @@ from rushdecomp.arm9 import (  # noqa: E402
 )
 from rushdecomp.banner import Banner  # noqa: E402
 from rushdecomp.crc import crc16, crc16_ccitt  # noqa: E402
-from rushdecomp.header import Header, looks_like_nds  # noqa: E402
-from rushdecomp.rom import NDSRom, RomError  # noqa: E402
+from rushdecomp.header import (  # noqa: E402
+    Header,
+    declared_extents,
+    looks_like_nds,
+    required_length,
+    size_report,
+)
+from rushdecomp.rom import NDSRom, RomError, diagnose  # noqa: E402
 from rushdecomp.util import p32  # noqa: E402
 
 from make_test_rom import build_test_rom  # noqa: E402
@@ -238,6 +244,77 @@ class HeaderTest(unittest.TestCase):
     def test_open_rejects_junk(self):
         with self.assertRaises(RomError):
             NDSRom(bytes(0x400))
+
+
+class SizeReportTest(unittest.TestCase):
+    """Trim vs. truncation -- a complete dump versus one with a hole in it.
+
+    A retail Sonic Rush card is 64 MiB, and dumps in the wild are very often
+    *trimmed*: the trailing padding removed, data intact.  That looks identical
+    at a glance to a dump that is genuinely missing its tail, and only the
+    second one produces a disassembly with a gap in it.  These tests pin the
+    distinction down.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.image = build_test_rom()
+        cls.rom = NDSRom(cls.image, path="<synthetic>")
+
+    def test_a_complete_but_trimmed_image_is_not_called_truncated(self):
+        text = "\n".join(self.rom.size_report())
+        self.assertIn("trimmed", text)
+        self.assertNotIn("TRUNCATED", text)
+
+    def test_truncation_is_detected_even_though_parsing_refuses_the_image(self):
+        """The whole point: the diagnosis must not need a parseable image."""
+        data = self.image[: -0x1000]
+        with self.assertRaises(RomError):
+            NDSRom(data)
+        text = "\n".join(diagnose(data, path="truncated.nds"))
+        self.assertIn("TRUNCATED", text)
+        self.assertIn("ARM7 extent", text, "the rejection reason is kept")
+
+    def test_truncation_quotes_the_exact_shortfall(self):
+        data = self.image[: -0x1000]
+        need, _why = required_length(Header.parse(data))
+        text = "\n".join(diagnose(data))
+        self.assertIn(f"0x{need - len(data):x}", text)
+
+    def test_a_full_dump_is_recognised(self):
+        data = bytearray(self.image)
+        data[0x014] = 0  # capacity code 0 -> 0x20000, small enough to pad out
+        data += bytes(0x20000 - len(data))
+        text = "\n".join(size_report(Header.parse(bytes(data)), len(data)))
+        self.assertIn("full untrimmed dump", text)
+
+    def test_an_over_long_image_is_flagged(self):
+        data = bytearray(self.image)
+        data[0x014] = 0
+        data += bytes(0x20000 - len(data) + 0x200)
+        text = "\n".join(size_report(Header.parse(bytes(data)), len(data)))
+        self.assertIn("LONGER than capacity", text)
+
+    def test_the_fat_end_outranks_the_header_extents(self):
+        """Nitro files sit past every table, so the FAT is the real end of data."""
+        header = Header.parse(self.image)
+        alone, _why = required_length(header)
+        with_fat, why = required_length(header, data_end=alone + 0x9000)
+        self.assertEqual(with_fat, alone + 0x9000)
+        self.assertIn("Nitro file", why)
+
+    def test_absent_regions_do_not_invent_extents(self):
+        """A zero-length table must not report an extent ending at its offset."""
+        header = Header.parse(self.image)
+        extents = declared_extents(header)
+        for name, start, end in extents:
+            self.assertGreater(end, start, name)
+        self.assertIn("ARM9", {name for name, _s, _e in extents})
+
+    def test_too_small_to_diagnose(self):
+        text = "\n".join(diagnose(b"\x00" * 0x40))
+        self.assertIn("at least 0x160", text)
+        self.assertIn("header itself is absent", text)
 
 
 class BannerTest(unittest.TestCase):
@@ -453,6 +530,17 @@ class CliTest(unittest.TestCase):
         rebuilt_path = os.path.join(self.tmp.name, "build", "rebuilt.nds")
         with open(rebuilt_path, "rb") as handle:
             self.assertEqual(handle.read(), open(self.rom_path, "rb").read())
+
+    def test_report_diagnoses_a_truncated_image(self):
+        """A dump with its tail missing must say how much, not just fail."""
+        truncated = os.path.join(self.tmp.name, "truncated.nds")
+        with open(truncated, "wb") as handle:
+            handle.write(build_test_rom()[:-0x1000])
+        out = self.run_cli("report", "--rom", truncated)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("TRUNCATED", out.stdout)
+        self.assertIn("header-only diagnosis", out.stdout)
+        self.assertIn("ARM7 extent", out.stderr)
 
     def test_progress(self):
         self.run_cli("extract", "--rom", self.rom_path)

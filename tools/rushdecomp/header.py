@@ -19,7 +19,16 @@ from typing import Optional
 from .crc import crc16
 from .util import p16, u16, u32, u64
 
-__all__ = ["Header", "HEADER_SIZE", "SECURE_AREA_OFFSET", "SECURE_AREA_SIZE"]
+__all__ = [
+    "Header",
+    "HEADER_SIZE",
+    "SECURE_AREA_OFFSET",
+    "SECURE_AREA_SIZE",
+    "declared_extents",
+    "required_length",
+    "size_report",
+    "looks_like_nds",
+]
 
 HEADER_SIZE = 0x4000
 SECURE_AREA_OFFSET = 0x4000
@@ -256,7 +265,6 @@ class Header:
             f"Y7    rom 0x{self.arm7_overlay_offset:08x}  size 0x{self.arm7_overlay_size:08x}"
             f"  ({self.arm7_overlay_size // 32} overlays)",
             f"Banner rom 0x{self.banner_offset:08x}",
-            f"Total used ROM size : 0x{self.total_used_rom_size:08x}",
             f"Header size         : 0x{self.header_size:08x}",
             f"Logo CRC16          : 0x{self.logo_crc:04x}",
             f"Header CRC16        : 0x{self.header_crc:04x}",
@@ -377,3 +385,106 @@ def looks_like_nds(data: bytes) -> Optional[str]:
     if arm7_off + arm7_size > len(data):
         return "ARM7 extent runs past the end of the file"
     return None
+
+
+def declared_extents(header: Header) -> list[tuple[str, int, int]]:
+    """Every ``(name, start, end)`` region the header itself points at.
+
+    Zero-length regions are dropped rather than reported as ending at their
+    offset, so an absent overlay table cannot invent an extent or drag a
+    maximum down to zero.
+    """
+    candidates = [
+        ("header", 0, header.header_size or HEADER_SIZE),
+        ("secure area", SECURE_AREA_OFFSET, header.secure_area_end),
+        ("ARM9", header.arm9_rom_offset, header.arm9_rom_offset + header.arm9_size),
+        ("ARM7", header.arm7_rom_offset, header.arm7_rom_offset + header.arm7_size),
+        ("FNT", header.fnt_offset, header.fnt_offset + header.fnt_size),
+        ("FAT", header.fat_offset, header.fat_offset + header.fat_size),
+        (
+            "Y9 overlays",
+            header.arm9_overlay_offset,
+            header.arm9_overlay_offset + header.arm9_overlay_size,
+        ),
+        (
+            "Y7 overlays",
+            header.arm7_overlay_offset,
+            header.arm7_overlay_offset + header.arm7_overlay_size,
+        ),
+        ("banner", header.banner_offset, header.banner_offset + header.banner_size),
+    ]
+    return [(name, start, end) for name, start, end in candidates if end > start]
+
+
+def required_length(header: Header, data_end: Optional[int] = None) -> tuple[int, str]:
+    """The shortest image that still holds everything the tables reference.
+
+    *data_end* lets a caller that parsed the FAT contribute the true end of the
+    last Nitro file, which usually sits past every header-declared region and is
+    the bound a trimming tool actually cuts at.  Returns ``(length, why)``.
+    """
+    extents = declared_extents(header)
+    best_name, best_end = "header", HEADER_SIZE
+    for name, _start, end in extents:
+        if end > best_end:
+            best_name, best_end = name, end
+    if data_end is not None and data_end > best_end:
+        return data_end, "last Nitro file in the FAT"
+    return best_end, f"end of {best_name}"
+
+
+def size_report(
+    header: Header, actual_length: int, *, data_end: Optional[int] = None
+) -> list[str]:
+    """Classify an image's length against the header's own size claims.
+
+    "Smaller than the cartridge" is ambiguous on its own: a *trimmed* dump has
+    had its trailing padding removed and is complete, while a *truncated* dump
+    is silently missing data and will produce a disassembly with a hole in it.
+    Both look identical at a glance.  This separates them by asking what the
+    image's own tables require, rather than by trusting ``total_used_rom_size``
+    (0x084) alone -- homebrew and some bad dumps leave that field zero or
+    stale, and it is not covered by the header CRC.
+    """
+    capacity = header.rom_capacity
+    used = header.total_used_rom_size
+    need, why = required_length(header, data_end)
+
+    lines = [
+        f"Cartridge capacity    : 0x{capacity:08x} ({capacity / 1048576:.0f} MiB)",
+        f"Image length          : 0x{actual_length:08x} ({actual_length / 1048576:.2f} MiB)",
+        f"Total used ROM size   : 0x{used:08x}"
+        + ("" if used else "  (unset; common on homebrew)"),
+        f"Data required by      : 0x{need:08x}  ({why})",
+    ]
+
+    if actual_length < need:
+        lines.append(
+            f"Verdict               : TRUNCATED -- 0x{need - actual_length:x} "
+            f"({need - actual_length:,} bytes) of referenced data is missing; "
+            "extraction will be incomplete"
+        )
+        return lines
+
+    if used and actual_length < used:
+        lines.append(
+            f"Verdict               : SHORT of the header's own 'used' field by "
+            f"0x{used - actual_length:x} bytes, but every referenced region is "
+            "present; the field is likely stale"
+        )
+        return lines
+
+    if actual_length == capacity:
+        lines.append("Verdict               : full untrimmed dump")
+    elif actual_length > capacity:
+        lines.append(
+            f"Verdict               : LONGER than capacity by 0x{actual_length - capacity:x} "
+            "bytes -- the device_capacity code or the image is wrong"
+        )
+    else:
+        lines.append(
+            f"Verdict               : trimmed -- {capacity - actual_length:,} bytes of "
+            f"trailing padding removed, all referenced data present "
+            f"(0x{actual_length - need:x} of slack past it)"
+        )
+    return lines

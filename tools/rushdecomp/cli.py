@@ -28,8 +28,8 @@ from . import lz77
 from .assembler import assemble_file, round_trip
 from .disasm import Disassembler, Mode, require_capstone, write_sidecar
 from .progress import load_progress, save_progress
-from .rom import BinaryImage, NDSRom, RomError
-from .util import ensure_dir, hexdigest, human_size, write_file
+from .rom import BinaryImage, NDSRom, RomError, diagnose
+from .util import ensure_dir, hexdigest, human_size, read_file, write_file
 
 __all__ = ["main", "build_parser"]
 
@@ -67,7 +67,20 @@ def _resolve_rom(path: Optional[str]) -> str:
 # --------------------------------------------------------------------------
 def cmd_report(args: argparse.Namespace) -> int:
     """Print a full structural report of the cartridge image."""
-    rom = NDSRom.open(_resolve_rom(args.rom))
+    path = _resolve_rom(args.rom)
+    try:
+        rom = NDSRom.open(path)
+    except RomError as error:
+        # A malformed or truncated dump still has to explain itself.  How much
+        # data is missing -- and whether it is a harmless trim or a real
+        # truncation -- matters more than the fact that parsing stopped.
+        _fail(str(error))
+        try:
+            _say()
+            _say("\n".join(diagnose(read_file(path), path=path)))
+        except OSError as io_error:
+            _fail(f"cannot re-read {path} for diagnosis: {io_error}")
+        return 1
     _say(rom.report())
     if args.json:
         _say()

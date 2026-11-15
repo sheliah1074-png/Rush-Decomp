@@ -21,15 +21,46 @@ from .arm9 import ARM9Image
 from .banner import Banner
 from .filesystem import FileEntry, NitroFileSystem
 from .header import Header, looks_like_nds
+from .header import size_report as header_size_report
 from .overlays import Overlay, OverlayTable
 from .secure import SecureArea
 from .util import hexdigest, read_file
 
-__all__ = ["NDSRom", "BinaryImage", "RomError"]
+__all__ = ["NDSRom", "BinaryImage", "RomError", "diagnose"]
 
 
 class RomError(RuntimeError):
     """Raised when an image cannot be parsed at all."""
+
+
+def diagnose(data: bytes, *, path: Optional[str] = None) -> list[str]:
+    """Explain an image that :class:`NDSRom` refuses to parse.
+
+    ``looks_like_nds`` rejects a truncated dump before anything else runs, which
+    is the right safety behaviour for extraction but the wrong one for
+    reporting: an image with its tail missing is exactly when someone needs to
+    be told *how much* is missing, and whether it is a harmless trim or a real
+    truncation.  This reads only the header, so it works on any image of at
+    least 0x160 bytes, valid or not.
+    """
+    label = path or "<image>"
+    if len(data) < 0x160:
+        return [
+            f"{label}: {len(data)} bytes; a DS cartridge image needs at least 0x160",
+            "nothing further can be determined -- the header itself is absent",
+        ]
+
+    lines = [f"{label}: header-only diagnosis (image could not be fully parsed)"]
+    reason = looks_like_nds(data)
+    if reason:
+        lines.append(f"  rejected because: {reason}")
+    try:
+        parsed = Header.parse(data)
+    except (ValueError, IndexError) as error:
+        lines.append(f"  header unreadable: {error}")
+        return lines
+    lines += [f"  {line}" for line in header_size_report(parsed, len(data))]
+    return lines
 
 
 @dataclasses.dataclass
@@ -369,6 +400,25 @@ class NDSRom:
             record["components"]["files"] = {"error": str(error)}
         return record
 
+    def _fat_data_end(self) -> Optional[int]:
+        """End of the last Nitro file, or ``None`` when the FAT is unreadable.
+
+        This is the authoritative "last byte of real data" on a retail card:
+        files sit after every header-declared table, so a trimming tool cuts
+        here and not at any offset the header records.
+        """
+        try:
+            ends = [entry.end for entry in self.filesystem.fat if entry.end > 0]
+        except (RomError, IndexError, AttributeError):
+            return None
+        return max(ends) if ends else None
+
+    def size_report(self) -> list[str]:
+        """Trim/truncation classification for this image; see :func:`header.size_report`."""
+        return header_size_report(
+            self.header, len(self.data), data_end=self._fat_data_end()
+        )
+
     def report(self) -> str:
         """The full extraction report printed by ``sr-extract --report``."""
         parts = [
@@ -385,6 +435,8 @@ class NDSRom:
             "Header",
             "-" * 72,
             self.header.describe(),
+            "",
+            *self.size_report(),
             "",
         ]
         for label, fn in (
