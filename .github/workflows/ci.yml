@@ -1,0 +1,213 @@
+name: CI
+
+# Runs entirely against the synthetic test image built by
+# tests/make_test_rom.py.  No ROM is present, fetched or needed at any point,
+# which is the only reason this workflow can exist at all.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: toolchain (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 and 3.10 are past end of life and no longer present on the
+        # ubuntu-latest runner image, so setup-python cannot install them.
+        python-version: ['3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Byte-compile
+        run: python -m compileall -q tools tests
+
+      - name: Build the synthetic test image
+        run: python tests/make_test_rom.py build/selftest.nds
+
+      - name: Run the test suite
+        run: python tests/test_pipeline.py
+
+      - name: Full pipeline against the synthetic image
+        run: |
+          set -e
+          python tools/sr extract --rom build/selftest.nds --banner --secure
+          for c in arm9 arm7 arm9_overlay_000 arm9_overlay_001 arm9_overlay_002; do
+            python tools/sr disasm "$c"
+            python tools/sr verify "$c" --strict
+          done
+          python tools/sr rebuild --rom build/selftest.nds --keep-going
+          cmp build/rebuilt.nds build/selftest.nds
+          echo "rebuilt image is byte-identical to the synthetic base"
+
+      - name: Progress accounting
+        run: python tools/sr progress --json build/progress.json
+
+      - name: File system dump
+        run: python tools/sr dumpfs --rom build/selftest.nds
+
+  hygiene:
+    name: no cartridge image in the repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, so the large-file scan covers every commit rather
+          # than just the tip.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Hygiene tests
+        run: python tests/test_pipeline.py RepoHygieneTest
+
+      - name: .gitignore excludes the cartridge and its verbatim contents
+        run: |
+          set -e
+          for path in baserom/x.nds data/arm9.bin fsdump/data/tex.ncgr \
+                      build/rebuilt.nds tools/keys/nds_key1.bin; do
+            git check-ignore -q "$path" || {
+              echo "::error::$path is not gitignored"
+              exit 1
+            }
+            echo "ok: $path is ignored"
+          done
+
+      - name: .gitignore does not swallow the work product
+        run: |
+          set -e
+          # The mirror of the step above, and the failure mode that stays quiet:
+          # a rule broad enough to keep a ROM out can keep the disassembly out
+          # too, leaving a repository that looks clean and contains no work.
+          for path in asm/arm9.s asm/arm9.json assets/symbols/arm9.txt \
+                      src/example/example.c; do
+            if git check-ignore -q "$path"; then
+              echo "::error::$path is gitignored but must be committable"
+              exit 1
+            fi
+            echo "ok: $path is committable"
+          done
+
+      - name: No tracked file is named like a cartridge image
+        run: |
+          set -e
+          # Narrowed to DS image extensions on purpose. This job used to forbid
+          # every ROM-like extension including .bin and .ppm, on the theory that
+          # nothing derived from a cartridge may be committed. The policy is now
+          # that derived work IS the deliverable and only the image itself is
+          # excluded, so .bin and .ppm have to go -- they are what converted art
+          # and extraction sidecars are named. Kept in step with
+          # RepoHygieneTest.test_no_tracked_file_is_named_like_a_cartridge_image.
+          bad=$(git ls-files \
+                | grep -Ei '\.(nds|srl|dsg|nd)$' \
+                | grep -v '^tests/data/testrom\.nds$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::tracked files with cartridge-image extensions:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "ok: no tracked file is named like a cartridge image"
+
+      - name: No tracked binary file exceeds 1 MiB
+        run: |
+          set -e
+          # Text is exempt: a full ARM9 disassembly legitimately runs to tens of
+          # megabytes. A binary that large is either a cartridge image or raw
+          # extraction output, and both belong in a gitignored directory.
+          fail=0
+          while IFS= read -r path; do
+            [ -f "$path" ] || continue
+            if head -c 4096 "$path" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
+              continue
+            fi
+            size=$(stat -c %s "$path")
+            if [ "$size" -gt 1048576 ]; then
+              echo "::error::$path is a $size-byte binary file"
+              fail=1
+            fi
+          done < <(git ls-files)
+          [ "$fail" -eq 0 ] && echo "ok: every tracked binary file is under 1 MiB"
+          exit "$fail"
+
+      - name: No cartridge image anywhere in history
+        run: |
+          set -e
+          # Extension matching is trivia -- a renamed or split image slips past
+          # it. This reads the first 0x4000 bytes of every blob ever committed
+          # and applies the same conjunctive header test the toolchain uses to
+          # identify a cartridge, so it catches an image under any name.
+          python - <<'PY'
+          import subprocess, sys
+          sys.path.insert(0, "tools")
+          from rushdecomp.header import looks_like_cartridge_prefix
+
+          allowed = {"tests/data/testrom.nds"}
+
+          # rev-list emits commits and trees alongside blobs, and asking
+          # cat-file for a commit as though it were a blob fails outright, so
+          # resolve the type of every object first and keep only the blobs.
+          listing = subprocess.run(
+              ["git", "rev-list", "--objects", "--all"],
+              capture_output=True, text=True, check=True,
+          )
+          typed = subprocess.run(
+              ["git", "cat-file",
+               "--batch-check=%(objecttype) %(objectname) %(rest)"],
+              input=listing.stdout, capture_output=True, text=True, check=True,
+          )
+
+          blobs = {}
+          for line in typed.stdout.splitlines():
+              parts = line.split(" ", 2)
+              if len(parts) < 2 or parts[0] != "blob":
+                  continue
+              name = parts[2] if len(parts) > 2 else "<unnamed>"
+              blobs.setdefault(parts[1], name)
+
+          bad = []
+          for sha, name in blobs.items():
+              if name in allowed:
+                  continue
+              content = subprocess.run(
+                  ["git", "cat-file", "blob", sha], capture_output=True, check=True,
+              ).stdout[:0x4000]
+              reason = looks_like_cartridge_prefix(content)
+              if reason:
+                  bad.append(f"{name} ({sha[:10]}): {reason}")
+
+          if bad:
+              print("::error::cartridge image found in git history:")
+              print("\n".join(bad))
+              sys.exit(1)
+          print(f"ok: scanned {len(blobs)} blobs across all history; none is a cartridge image")
+          PY
