@@ -1,0 +1,69 @@
+{
+  "_comment": [
+    "Expected identity for the North American Sonic Rush revision.",
+    "",
+    "A mismatch is reported, not fatal: a European or Japanese dump parses and",
+    "disassembles identically. What differs is every absolute code address, so",
+    "annotations and symbol maps are only portable within one revision. This",
+    "file exists so that `sr report` can tell you which one you are holding",
+    "before you spend an hour naming functions that will not line up with",
+    "anyone else's.",
+    "",
+    "The checksums are deliberately absent. Filling them in would require",
+    "committing a hash of a copyrighted image, which is the first step toward",
+    "committing the image. Record your own dump's digest locally instead --",
+    "`make report` prints it."
+  ],
+
+  "revision": "srse",
+  "region": "North America",
+
+  "expected": {
+    "game_title": "SONIC RUSH",
+    "game_code": "SRSE",
+    "maker_code": "8P",
+    "unit_code": 0
+  },
+
+  "other_revisions": {
+    "srsp": {
+      "region": "Europe",
+      "game_code": "SRSP",
+      "maker_code": "8P"
+    },
+    "srjj": {
+      "region": "Japan",
+      "game_code": "SRJJ",
+      "maker_code": "8P"
+    }
+  },
+
+  "processors": {
+    "arm9": {
+      "cpu": "arm946e-s",
+      "typical_ram_address": "0x02000000",
+      "gcc_flags": "-mcpu=arm946e-s -mthumb-interwork"
+    },
+    "arm7": {
+      "cpu": "arm7tdmi",
+      "typical_ram_address": "0x02380000",
+      "gcc_flags": "-mcpu=arm7tdmi -mthumb-interwork"
+    }
+  },
+
+  "compression_policy": {
+    "arm9": "arm9-footer",
+    "arm7": "none",
+    "overlays": "overlay-flag",
+    "filesystem_files": "none"
+  },
+
+  "paths": {
+    "baserom": "baserom/sonic_rush.nds",
+    "data": "data",
+    "asm": "asm",
+    "src": "src",
+    "fsdump": "fsdump",
+    "build": "build"
+  }
+}

@@ -1,0 +1,143 @@
+name: CI
+
+# Runs entirely against the synthetic test image built by
+# tests/make_test_rom.py.  No ROM is present, fetched or needed at any point,
+# which is the only reason this workflow can exist at all.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: toolchain (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Byte-compile
+        run: python -m compileall -q tools tests
+
+      - name: Build the synthetic test image
+        run: python tests/make_test_rom.py build/selftest.nds
+
+      - name: Run the test suite
+        run: python tests/test_pipeline.py
+
+      - name: Full pipeline against the synthetic image
+        run: |
+          set -e
+          python tools/sr extract --rom build/selftest.nds --banner --secure
+          for c in arm9 arm7 arm9_overlay_000 arm9_overlay_001 arm9_overlay_002; do
+            python tools/sr disasm "$c"
+            python tools/sr verify "$c" --strict
+          done
+          python tools/sr rebuild --rom build/selftest.nds --keep-going
+          cmp build/rebuilt.nds build/selftest.nds
+          echo "rebuilt image is byte-identical to the synthetic base"
+
+      - name: Progress accounting
+        run: python tools/sr progress --json build/progress.json
+
+      - name: File system dump
+        run: python tools/sr dumpfs --rom build/selftest.nds
+
+  hygiene:
+    name: no ROM-derived data in the repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, so the large-file scan covers every commit rather
+          # than just the tip.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Hygiene tests
+        run: python tests/test_pipeline.py RepoHygieneTest
+
+      - name: .gitignore covers every generated directory
+        run: |
+          set -e
+          for path in baserom/x.nds data/arm9.bin asm/arm9.s fsdump/a.bin \
+                      build/rebuilt.nds tools/keys/nds_key1.bin; do
+            git check-ignore -q "$path" || {
+              echo "::error::$path is not gitignored"
+              exit 1
+            }
+            echo "ok: $path is ignored"
+          done
+
+      - name: No tracked file looks like a ROM
+        run: |
+          set -e
+          bad=$(git ls-files | grep -Ei '\.(nds|srl|ds|nd|dsg|gba|sfc|smc|gen|md|bin|ppm|sav)$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::tracked files with ROM-like extensions:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "ok: no tracked file has a ROM-like extension"
+
+      - name: No tracked file exceeds 1 MiB
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r path; do
+            [ -f "$path" ] || continue
+            size=$(stat -c %s "$path")
+            if [ "$size" -gt 1048576 ]; then
+              echo "::error::$path is $size bytes"
+              fail=1
+            fi
+          done < <(git ls-files)
+          [ "$fail" -eq 0 ] && echo "ok: every tracked file is under 1 MiB"
+          exit "$fail"
+
+      - name: No binary blobs anywhere in history
+        run: |
+          set -e
+          # Any blob over 1 MiB in any commit is a red flag: generated data
+          # belongs outside version control.
+          bad=$(git rev-list --objects --all \
+                | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' \
+                | awk '$1=="blob" && $2 > 1048576 {print $3" ("$2" bytes)"}' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::oversized blobs in history:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "ok: no blob over 1 MiB in any commit"

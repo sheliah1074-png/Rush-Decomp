@@ -1,0 +1,15 @@
+# Rush-Decomp toolchain dependencies.
+#
+# Both are pure-Python wheels bundling a native library, so `pip install -r`
+# works on Linux, macOS and Windows with no compiler and no system packages.
+# Neither is needed to read the documentation or to inspect the repository.
+#
+#   capstone        ARM/Thumb disassembly
+#   keystone-engine ARM/Thumb assembly, for the byte-exactness round trip
+#
+# A C cross-toolchain (arm-none-eabi-gcc) is only needed once you start
+# compiling hand-written C under src/.  See docs/BUILDING.md; it is not a
+# Python dependency and is not installed by `make deps`.
+
+capstone>=5.0.0
+keystone-engine>=0.9.2
